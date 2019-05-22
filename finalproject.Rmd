@@ -127,7 +127,7 @@ To tidy the dataset, we first converted each column to the appropriate type and 
 
 ```{r country_scrape, echo=TRUE, message=FALSE, warning=FALSE}
 # grab country data
-country.data <- read.csv("~/Downloads/countries.csv")
+country.data <- read.csv("./countries.csv")
 colnames(country.data) <- c("Country", "Region", "Population", "Area","Density", 
                             "CoastlineCoastAreaRatio", "NetMigration", 
                             "InfantMortality", "GDP", "Literacy", "PhonesPerCapita",
@@ -493,7 +493,6 @@ for (x in 1:nrow(spotify)) {
     spotify[x,y + 6] <- track.details[x,y]
   }
 }
-spotify %>%
 ```
 
 The following exploratory data analysis visualizes the relationship between literacy and the speechiness of the most popular songs of a country. We begin with showing the distribution of speechiness across the country dataset by region. While the average literacy of the world is approximately 80% and the chosen countries have above average literacy, we do not see a clear trend toward more literate countries preferring more speech in their songs. Values between 0.33 and 0.66 include a mix of speech and song often found in rap music; so one could begin to consider that North and South American countries may enjoy this type of music more because the upper whisker and outliers lean well into that area.
