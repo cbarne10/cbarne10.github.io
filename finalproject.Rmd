@@ -1,0 +1,728 @@
+---
+title: "Final Group Project"
+author: "Aaron Kyei-Asare, Lexi Bacot, and Catelyn Barnes"
+date: "5/22/2019"
+output: html_document
+---
+
+## **Introduction**
+
+Hi! This final project researches and analyzes different aspects of music and how they correlate with the part of the world they are from. The goal of this project is to utilize data science methods and tools in order to recognize relationships between music and the places it is made worldwide. Music is relevant to human nature. It not only encourages brain activity and creativity but also is a way of expression and communication. According to Gilbert Galindo, "the role of arts and music in our society fill a void that we all need in order to enrich ourselves and our culture, they provide alternate infinite experiences, and they also further enhance the skills we use in other disciplines and professions." In this project, we wanted to address the effects of this on the world and show that music can be applied to data science. Music has a large data threshold that further shows the trends and aspects that directly affect the people and consequentially affect data science. 
+
+Using the music platform, Spotify, our team utilized their Top 200 Song Lists globally and from selected countries in different regions of the world: Brazil, France, Singapore, and the United States. Spotify is a user-friendly platform that allows customers to stream music and browse and create playlists. Within these lists, we found different attributes of songs (i.e. danceability, energy, and speechiness) and their correlations to the number of streams in a specific region and the overall aesthetic of the region's musical interests. 
+
+Our project is divided into several parts: data scraping, exploratory data analysis, hypothesis testing, machine learning, and an evaluation of the experiment. This tutorial will detail how we accomplished our project's goal and provide you with tools and external research to explore our project.
+
+```{r setup, include=FALSE}
+#knitr::opts_chunk$set(echo = TRUE)
+#install.packages('spotifyr')
+#install.packages("plotly", type = "source")
+
+```
+
+```{r init, echo=TRUE, message=FALSE, warning=FALSE}
+library(rvest)
+library(tidyverse)
+library(magrittr)
+library(scales)
+library(knitr)
+library(stringr)
+library(lubridate)
+library(dplyr)
+library(tibble)
+library(spotifyr)
+library(plotly)
+
+Sys.setenv(SPOTIFY_CLIENT_ID = '33efc0e0f4864311abcfcb8466803dfa')
+Sys.setenv(SPOTIFY_CLIENT_SECRET = 'bb4bc86770ff4663ba53258f6c41924c')
+
+# inialization of theme settings
+theme_set(theme_classic())
+my.theme <- theme(
+  plot.title = element_text(hjust = 0.5, size = 22, margin = margin(t = 0, r = 0, b = 20, l = 0)),
+  axis.title.x = element_text(size = 20, margin = margin(t = 20, r = 0, b = 20, l = 0)),
+  axis.title.y = element_text(size = 20, margin = margin(t = 0,r = 25, b = 0, l = 0)),
+  axis.text = element_text(angle = 90, size = 12, hjust= 1)
+)
+```
+
+## **Data Ingestion**
+
+For our report, we are using the following two datasets: 
+
+1. [Spotify Dataset](https://spotifycharts.com/regional)
+2. [Country Dataset](https://www.kaggle.com/fernandol/countries-of-the-world)
+
+
+Most of the data we intend to use is hosted as part of HTML files on the Spotify webpages. The markup structure of HTML allows us to parse data into tables we can use for analysis. The full extent of our scraping from Spotify charts can be analyzed in 3 intermediate steps:
+1) Formation of appropriate URL sequences based on region and dates
+2) Creation of a scrape function to parse song rank, track name, artist, number of streams, and song URL
+3) Merging of scraped data with track details acquired via GET requests to the Spotify API
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+url_us <- "https://spotifycharts.com/regional/us/daily/"
+url_br <- "https://spotifycharts.com/regional/br/daily/"
+url_fr <- "https://spotifycharts.com/regional/fr/daily/"
+url_sg <- "https://spotifycharts.com/regional/sg/daily/"
+url_global <- "https://spotifycharts.com/regional/global/daily/"
+```
+
+We want to create dates from 2019-05-1 to 2019-05-10. We address this with the seq() function along with R’sdate object whivh allows us to compose our sequence as counted by “day.”
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+dates <- seq(as.Date("2019/05/01"), as.Date("2019/05/10"), by = "day")
+dates[1:10]
+
+unitedata <- function(date, url_base) {
+  full_url <- paste0(url_base, date)
+  full_url
+}
+
+finalus <- unitedata(dates, url_us)
+finalbr <- unitedata(dates, url_br)
+finalfr <- unitedata(dates, url_fr)
+finalsg <- unitedata(dates, url_sg)
+finalglobal <- unitedata(dates, url_global)
+```
+
+The main function used in our scraper is html_nodes, which allows us to easily extract pieces out of HTML documents CSS selectors. By inspecting the Spotify page, we determined the class (.<className>) and element (tag_name) selectors associated with the desired pieces of information and stored them in variables corresponding to the information they represent (page, rank, track, artist, streams, dates, song_url).
+
+We then combine the nodes, and provide them names for the data frame using c(""...).
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+SpotifyScrape <- function(x) {
+  page <- x
+  rank <- page %>% read_html() %>% html_nodes('.chart-table-position') %>% html_text() %>%
+    as.data.frame()
+  track <- page %>% read_html() %>% html_nodes('strong') %>% html_text() %>% as.data.frame()
+  artist <- page %>% read_html() %>% html_nodes('.chart-table-track span') %>% html_text() %>%
+    as.data.frame()
+  streams <- page %>% read_html() %>% html_nodes('td.chart-table-streams') %>% html_text() %>% 
+    as.data.frame()
+  dates <- page %>% read_html() %>% html_nodes('.responsive-select~ .responsive-select+ 
+                                               .responsive-select .responsive-select-value') %>% 
+    html_text() %>% as.data.frame()
+  song_url <- page %>% read_html() %>% html_nodes('td.chart-table-image > a')  %>%  
+    html_attr("href") %>% as.data.frame() 
+
+#combine, name, and make it a tibble
+  chart <- cbind(rank, track, artist, streams, dates, song_url)
+  names(chart) <- c("Rank", "Track", "Artist", "Streams", "Date", "Song URL")
+  chart <- as.tibble(chart) %>% slice(1:50)
+
+  return(chart)
+}
+```
+
+Because we decided to look at the relationship between music and the places it is made worldwide, we also pulled relevant Country data (i.e. Population, GDP, Literacy Rate) via a CSV file. This data is drawn from the US Government's World Factbook by downloading the publicly available CSV file.
+The following are a brief description of columns of interest to our analysis:
+
+* **Country**: A categorical value reflecting the name of a country,
+* **Population**: A discrete numerical value reflecting the number of people in a country.
+* **Literacy**: A continuous numerical value reflecting the proportion of a population who are literate,
+* **Industry**: A continuous numerical value reflecting what proportion of the country's economy is industry-based.
+
+We use read_csv to read data from the CSV file into a data frame. Given the structure of CSV files where each line in the CSV file corresponds to an observation and each line contains values separated by a comma (,), corresponding to the variables of each observation, reading the data is coherent and straightforward.
+
+To tidy the dataset, we first converted each column to the appropriate type and replaced invalid characters such as commas with decimals to achieve a correct interpretation of the numerical values. We also included a summary row that averages the numerical values; this is thought of as a baseline in our analysis. Approximately 2% of the dataset contains missing values-- constrained only to numerical values. This is not a concern because we select 4 countries (United States, Singapore, Brazil, and France) who do not possess any missing values for our analysis; nor does this greatly impair our interpretation of the summary row.
+
+```{r country_scrape, echo=TRUE, message=FALSE, warning=FALSE}
+# grab country data
+country.data <- read.csv("~/Downloads/countries.csv")
+colnames(country.data) <- c("Country", "Region", "Population", "Area","Density", 
+                            "CoastlineCoastAreaRatio", "NetMigration", 
+                            "InfantMortality", "GDP", "Literacy", "PhonesPerCapita",
+                            "Arable", "Crops", "Other", "Climate", "BirthRate", 
+                            "DeathRate", "Agriculture", "Industry", "Service")
+country.data <- country.data %>%
+  mutate(
+    Country= as.character(Country),
+    CoastlineCoastAreaRatio = as.numeric(str_replace(CoastlineCoastAreaRatio, ',', '.')),
+    Density = as.numeric(str_replace(Density, ',', '.')),
+    Literacy= as.numeric(paste('.', str_replace(Literacy, ',',''), sep='')),
+    PhonesPerCapita= as.numeric(str_replace(PhonesPerCapita, ',', '.')),
+    Arable= as.numeric(str_replace(Arable, ',', '.')),
+    Crops= as.numeric(str_replace(Crops, ',', '.')),
+    Other= as.numeric(str_replace(Other, ',', '.')),
+    Climate= as.numeric(str_replace(Climate, ',', '.')),
+    BirthRate= as.numeric(str_replace(BirthRate, ',', '.')),
+    DeathRate= as.numeric(str_replace(DeathRate, ',', '.')),
+    GDP=as.numeric(GDP),
+    Agriculture= as.numeric(str_replace(Agriculture, ',', '.')),
+    Industry= as.numeric(str_replace(Industry, ',', '.')),
+    InfantMortality= as.numeric(str_replace(InfantMortality, ',', '.')),
+    NetMigration= as.numeric(str_replace(NetMigration, ',', '.')),
+    Service= as.numeric(str_replace(Service, ',', '.'))
+  )
+summary.row <- data.frame(
+  "Average", NA,  mean((country.data$Population), na.rm = TRUE),
+  mean((country.data$Area)), mean((country.data$Density), na.rm = TRUE),
+  mean((country.data$CoastlineCoastAreaRatio), na.rm = TRUE),
+  mean((country.data$NetMigration), na.rm = TRUE), 
+  mean((country.data$InfantMortality), na.rm = TRUE),
+  mean((country.data$GDP), na.rm = TRUE),
+  mean((country.data$Literacy), na.rm = TRUE),
+  mean((country.data$PhonesPerCapita), na.rm = TRUE),
+  mean((country.data$Arable), na.rm = TRUE),
+  mean((country.data$Crops), na.rm = TRUE),
+  mean((country.data$Other), na.rm = TRUE),
+  mean((country.data$Climate), na.rm = TRUE),
+  mean((country.data$BirthRate), na.rm = TRUE),
+  mean((country.data$DeathRate), na.rm = TRUE),
+  mean((country.data$Agriculture), na.rm = TRUE),
+  mean((country.data$Industry), na.rm = TRUE),
+  mean((country.data$Service), na.rm = TRUE)
+)
+names(summary.row) <- colnames(country.data)
+country.data <- country.data %>% 
+  rbind(summary.row) %>%
+  filter(
+    stringr::str_detect(Country,"United States") |
+      stringr::str_detect(Country,"Brazil") |
+      stringr::str_detect(Country,"France") |
+      stringr::str_detect(Country,"Singapore") |
+      stringr::str_detect(Country,"Average")
+  )
+
+country.data
+```
+
+By calling our scraper function with each country-specific URL, we are able to generate a data frame of Spotify chart data and track details for the US, Brazil, France, Singapore, and The World (Global). While we were able to scrape from the Top 200 list for 5 regions, we desired metadata about each individual song in the Top 200 lists so we are able to draw conclusions later about which characteristics contribute to the popularity of a song. This information was retrieved by using Spotify's Web API (Application Programming Interface) to issue GET Requests on the resources we desired more information on; and one may access this capability through the *Spotifyr* package offered through the CRAN library. To retrieve information about an individual track's characteristics, we call the Web API function *get_track_audio_features* using the SpotifyID (a unique identifier for any Spotify resource) found in the track's URL that was scraped from the website. This data required no further manipulation. The following are a brief description of columns of interest to our analysis:
+
+* **danceability**: A continuous numerical value reflecting how suitable the song is for dancing based on tempo, rhythm stability, beat strength, and regularity
+* **energy**: A continuous numerical value reflecting a song's intensity and activity as well as the song's dynamic range, perceived loudness, timbre, onset rate, and general entropy
+* **speechiness**: A continous numerical value reflecting the presence of spoken word in a song such that 1 is exclusively spoken and 0 is exclusively sung
+* **instrumentalness**: A continous numerical value reflecting the lack of vocals in a song
+* **liveness**: A continuous numerical value reflecting the likelihood that the song was performed live.
+
+```{r spotify_scrape, echo=TRUE, message=FALSE, warning=FALSE}
+# get track information for each song
+columns <- c("danceability", "energy", "key", "loudness", "mode", "speechiness",
+             "acousticness", "instrumentalness", "liveness", "valence", "tempo",
+             "type", "id", "uri", "track_href", "analysis_url", "duration_ms", 
+             "time_signature")
+country.columns <- c("Population", "Industry", "Literacy")
+
+# US
+us <- map_df(finalus, SpotifyScrape) %>%
+       mutate(Artist = gsub("by ", "", Artist), 
+       Streams = as.numeric(gsub(",", "", Streams)), 
+       Date = as.Date(Date, "%m/%d/%Y"))
+
+us.track.details <- data.frame(matrix(ncol= length(columns), nrow= 0))
+us.details <-  data.frame(matrix(ncol= length(country.columns), nrow= 0))
+
+colnames(us.track.details) <- columns
+colnames(us.details) <- country.columns
+
+us.data <- country.data %>% filter(str_detect(Country, "United States"))
+
+for (x in 1:nrow(us)) {
+  spotify_id <- basename(us$`Song URL`[x])
+  
+  us.track.details <- rbind(us.track.details, (get_track_audio_features(spotify_id)))
+  us.details <- rbind(us.details, c(us.data$Population, us.data$Industry, us.data$Literacy))
+  
+  for(z in 1:length(columns)) {
+    us[x, z + 6] <- us.track.details[x,z]
+  }
+  
+  for(y in 1:length(country.columns)) {
+    us[x,y + 24 ] <- us.details[x,y]
+  }
+}
+names(us) <- c("Rank", "Track", "Artist", "Streams", "Date", "Song URL", 
+               "danceability", "energy", "key", "loudness", "mode", "speechiness",
+               "acousticness", "instrumentalness", "liveness", "valence", "tempo",
+               "type", "id", "uri", "track_href", "analysis_url", "duration_ms", 
+               "time_signature", "Population", "Industry", "Literacy")
+us
+
+# BRAZIL
+brazil <- map_df(finalbr, SpotifyScrape) %>%
+       mutate(Artist = gsub("by ", "", Artist), 
+       Streams = as.numeric(gsub(",", "", Streams)), 
+       Date = as.Date(Date, "%m/%d/%Y"))
+br.track.details <- data.frame(matrix(ncol= length(columns), nrow= 0))
+br.details <-  data.frame(matrix(ncol= length(country.columns), nrow= 0))
+colnames(br.track.details) <- columns
+colnames(br.details) <- country.columns
+br.data <- country.data %>% filter(str_detect(Country, "Brazil"))
+for (x in 1:nrow(brazil)) {
+  spotify_id <- basename(brazil$`Song URL`[x])
+  br.track.details <- rbind(br.track.details, (get_track_audio_features(spotify_id)))
+  br.details <- rbind(br.details, c(br.data$Population, br.data$Industry, br.data$Literacy))
+  
+  for(z in 1:length(columns)) {
+    brazil[x, z + 6] <- br.track.details[x,z]
+  }
+  for(y in 1:length(country.columns)) {
+    brazil[x,y + 24 ] <- br.details[x,y]
+  }
+}
+names(brazil) <- c("Rank", "Track", "Artist", "Streams", "Date", "Song URL", 
+               "danceability", "energy", "key", "loudness", "mode", "speechiness",
+               "acousticness", "instrumentalness", "liveness", "valence", "tempo",
+               "type", "id", "uri", "track_href", "analysis_url", "duration_ms", 
+               "time_signature", "Population", "Industry", "Literacy")
+brazil
+
+# FRANCE
+france <- map_df(finalfr, SpotifyScrape) %>%
+       mutate(Artist = gsub("by ", "", Artist), 
+       Streams = as.numeric(gsub(",", "", Streams)), 
+       Date = as.Date(Date, "%m/%d/%Y"))
+fr.track.details <- data.frame(matrix(ncol= length(columns), nrow= 0))
+fr.details <-  data.frame(matrix(ncol= length(country.columns), nrow= 0))
+colnames(fr.track.details) <- columns
+colnames(fr.details) <- country.columns
+fr.data <- country.data %>% filter(str_detect(Country, "France"))
+for (x in 1:nrow(france)) {
+  spotify_id <- basename(france$`Song URL`[x])
+  fr.track.details <- rbind(fr.track.details, (get_track_audio_features(spotify_id)))
+  fr.details <- rbind(fr.details, c(fr.data$Population, fr.data$Industry, fr.data$Literacy))
+  
+  for(z in 1:length(columns)) {
+    france[x, z + 6] <- fr.track.details[x,z]
+  }
+  for(y in 1:length(country.columns)) {
+    france[x,y + 24 ] <- fr.details[x,y]
+  }
+}
+names(france) <- c("Rank", "Track", "Artist", "Streams", "Date", "Song URL", 
+               "danceability", "energy", "key", "loudness", "mode", "speechiness",
+               "acousticness", "instrumentalness", "liveness", "valence", "tempo",
+               "type", "id", "uri", "track_href", "analysis_url", "duration_ms", 
+               "time_signature", "Population", "Industry", "Literacy")
+france
+
+# SINGAPORE
+singapore <- map_df(finalsg, SpotifyScrape) %>%
+       mutate(Artist = gsub("by ", "", Artist), 
+       Streams = as.numeric(gsub(",", "", Streams)), 
+       Date = as.Date(Date, "%m/%d/%Y"))
+sg.track.details <- data.frame(matrix(ncol= length(columns), nrow= 0))
+sg.details <-  data.frame(matrix(ncol= length(country.columns), nrow= 0))
+colnames(sg.track.details) <- columns
+colnames(sg.details) <- country.columns
+sg.data <- country.data %>% filter(str_detect(Country, "Singapore"))
+for (x in 1:nrow(singapore)) {
+  spotify_id <- basename(singapore$`Song URL`[x])
+  sg.track.details <- rbind(sg.track.details, (get_track_audio_features(spotify_id)))
+  sg.details <- rbind(sg.details, c(sg.data$Population, sg.data$Industry, sg.data$Literacy))
+  
+  for(z in 1:length(columns)) {
+    singapore[x, z + 6] <- sg.track.details[x,z]
+  }
+  for(y in 1:length(country.columns)) {
+    singapore[x,y + 24 ] <- sg.details[x,y]
+  }
+}
+names(singapore) <- c("Rank", "Track", "Artist", "Streams", "Date", "Song URL", 
+               "danceability", "energy", "key", "loudness", "mode", "speechiness",
+               "acousticness", "instrumentalness", "liveness", "valence", "tempo",
+               "type", "id", "uri", "track_href", "analysis_url", "duration_ms", 
+               "time_signature", "Population", "Industry", "Literacy")
+singapore
+
+# GLOBAL
+global <- map_df(finalglobal, SpotifyScrape) %>%
+       mutate(Artist = gsub("by ", "", Artist), 
+       Streams = as.numeric(gsub(",", "", Streams)), 
+       Date = as.Date(Date, "%m/%d/%Y"))
+global.track.details <- data.frame(matrix(ncol= length(columns), nrow= 0))
+global.details <-  data.frame(matrix(ncol= length(country.columns), nrow= 0))
+colnames(global.track.details) <- columns
+colnames(global.details) <- country.columns
+global.data <- country.data %>% filter(str_detect(Country, "Average"))
+for (x in 1:nrow(global)) {
+  spotify_id <- basename(global$`Song URL`[x])
+  global.track.details <- rbind(global.track.details, (get_track_audio_features(spotify_id)))
+  global.details <- rbind(global.details, c(global.data$Population, global.data$Industry, global.data$Literacy))
+  
+  for(z in 1:length(columns)) {
+    global[x, z + 6] <- global.track.details[x,z]
+  }
+  for(y in 1:length(country.columns)) {
+    global[x,y + 24 ] <- global.details[x,y]
+  }
+}
+names(global) <- c("Rank", "Track", "Artist", "Streams", "Date", "Song URL", 
+               "danceability", "energy", "key", "loudness", "mode", "speechiness",
+               "acousticness", "instrumentalness", "liveness", "valence", "tempo",
+               "type", "id", "uri", "track_href", "analysis_url", "duration_ms", 
+               "time_signature", "Population", "Industry", "Literacy")
+global
+```
+
+
+## **Exploratory Data Analysis**
+The goal of Exploratory Data Analysis is to perform an initial exploration of attributes/variables across entities/observations. Within our project, we analyzed 5 attributes within our data collection. The attributes from the regions' track details were number of streams, danceability, energy, speechiness, liveness, and instrumentalness. The attributes from the country data that was analyzed is the population, region, and industry.
+
+Danceability is the quality or state to be danceable. This plot analyzes the level of danceability to the number of streams of the top ten songs in each region. Each region has different levels of danceability. However, it is apparent that the higher level of danceability has a correlation to larger numbers in streams. 
+```{r EDA_1, echo=TRUE, message=FALSE, warning=TRUE}
+library(plotly)
+us_dmut <- us %>% filter(us$Rank == "1" | us$Rank == "2" | us$Rank == "3" | us$Rank == "4" | us$Rank == "5" | us$Rank == "6" | us$Rank == "7" | us$Rank == "8" | us$Rank == "9" | us$Rank == "10") 
+us_dmut['Region']='North America'
+
+br_dmut <- brazil %>% filter(brazil$Rank == "1" | brazil$Rank == "2" | brazil$Rank == "3" | brazil$Rank == "4" | brazil$Rank == "5" | brazil$Rank == "6" | brazil$Rank == "7" | brazil$Rank == "8" | brazil$Rank == "9" | brazil$Rank == "10")
+br_dmut['Region']='South America'
+
+fr_dmut <- france %>% filter(france$Rank == "1" | france$Rank == "2" | france$Rank == "3" | france$Rank == "4" | france$Rank == "5" | france$Rank == "6" | france$Rank == "7" | france$Rank == "8" | france$Rank == "9" | france$Rank == "10")
+fr_dmut['Region']='Europe'
+
+sg_dmut <- singapore %>% filter(singapore$Rank == "1" | singapore$Rank == "2" | singapore$Rank == "3" | singapore$Rank == "4" | singapore$Rank == "5" | singapore$Rank == "6" | singapore$Rank == "7" | singapore$Rank == "8" | singapore$Rank == "9" | singapore$Rank == "10")
+sg_dmut['Region']='Asia'
+
+gl_dmut <- global %>% filter(global$Rank == "1" | global$Rank == "2" | global$Rank == "3" | global$Rank == "4" | global$Rank == "5" | global$Rank == "6" | global$Rank == "7" | global$Rank == "8" | global$Rank == "9" | global$Rank == "10")
+gl_dmut['Region']='World'
+
+dance <- do.call("rbind", list(us_dmut, br_dmut, fr_dmut, sg_dmut, gl_dmut))
+dance
+
+black <- "#000000"
+yellow <- "#ffff00"
+blue <- "#0000ff"
+red <- "#dc143c"
+green <- "#1ed760"
+
+visual1 <- ggplot(dance, aes(x=reorder(dance$Track, -dance$Streams), y=dance$danceability, fill=dance$Region, text=(paste("Track:", dance$Track, "<br>",
+                                      "Artist:", dance$Artist, "<br>",
+                                      "Danceability:", dance$danceability, "<br>",
+                                      "Number of Streams", dance$Streams, "<br>",
+                                      "Date", dance$Date))))+
+  geom_col()+
+  scale_fill_manual(values=c(black, yellow, blue, red, green))+
+  theme_minimal()+
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.ticks.y=element_blank(),
+        panel.grid.major = element_blank(),
+        legend.position="none")+
+  ylab("Danceability")+
+  facet_wrap(~ Region)+
+  ggtitle("Level of Danceability in Spotify Streams")
+
+visual1
+
+ggplotly(visual1, tooltip=c("text"))
+
+```
+
+Energy is a measure from 0.0 to 1.0 and represents a perceptual measure of intensity and activity. Typically, energetic tracks feel fast, loud, and noisy.
+Based on this, we’re going to look at energy for each country based on the difference between the energy score and 0.5. If the difference is above 0, it’s a more energetic song. The farther below 0, the more tranquil the track is.
+
+We filter each respective country's data frame to acquire only those songs which have a Rank from 1-10. Cumulatively, this results in a frame consisting of all songs which make a top 10 appearance per region over the course of 5/01/19 to 5/10/19. 
+```{r EDA_2, echo=TRUE, message=FALSE, warning=FALSE}
+us_mut <- us %>% filter(us$Rank == "1" | us$Rank == "2" | us$Rank == "3" | us$Rank == "4" | us$Rank == "5" | us$Rank == "6" | us$Rank == "7" | us$Rank == "8" | us$Rank == "9" | us$Rank == "10") %>%
+  mutate(difference=energy-0.50)
+us_mut['Region']='North America'
+
+br_mut <- brazil %>% filter(brazil$Rank == "1" | brazil$Rank == "2" | brazil$Rank == "3" | brazil$Rank == "4" | brazil$Rank == "5" | brazil$Rank == "6" | brazil$Rank == "7" | brazil$Rank == "8" | brazil$Rank == "9" | brazil$Rank == "10") %>%
+  mutate(difference=energy-0.50)
+br_mut['Region']='South America'
+
+fr_mut <- france %>% filter(france$Rank == "1" | france$Rank == "2" | france$Rank == "3" | france$Rank == "4" | france$Rank == "5" | france$Rank == "6" | france$Rank == "7" | france$Rank == "8" | france$Rank == "9" | france$Rank == "10") %>%
+  mutate(difference=energy-0.50)
+fr_mut['Region']='Europe'
+
+sg_mut <- singapore %>% filter(singapore$Rank == "1" | singapore$Rank == "2" | singapore$Rank == "3" | singapore$Rank == "4" | singapore$Rank == "5" | singapore$Rank == "6" | singapore$Rank == "7" | singapore$Rank == "8" | singapore$Rank == "9" | singapore$Rank == "10") %>%
+  mutate(difference=energy-0.50)
+sg_mut['Region']='Asia'
+
+gl_mut <- global %>% filter(global$Rank == "1" | global$Rank == "2" | global$Rank == "3" | global$Rank == "4" | global$Rank == "5" | global$Rank == "6" | global$Rank == "7" | global$Rank == "8" | global$Rank == "9" | global$Rank == "10") %>%
+  mutate(difference=energy-0.50)
+gl_mut['Region']='World'
+
+total <- do.call("rbind", list(us_mut, br_mut, fr_mut, sg_mut, gl_mut))
+total
+```
+
+For the sake of ease and aesthetics, we specify the hex color codes we plan on using in our visualization. We then use a ggplot2 to make a geom_col of the energy difference scores and faceted them by region to make it easier to compare the five regions.
+
+In the visual, we specifically note how the number of songs included in each regions plot fluctuates. This is because for certain regions such as North America, there was greater variation in Top 10 lists across the days as compared to regions such as Asia. 
+
+A tooltip is included in our final plot, which shows the Track Name, Artist, and Energy Score for each song that made an appearance in said region's Top 10 list from 5/01 to 5/10. 
+
+North America and South America seem to be the regions with more variation in less energetic and more energetic music, while Europe and Asia are more heavily energetic. This could reflect a greater diversity in music appreciation (both fast and slow) in North and South America.
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+black <- "#000000"
+yellow <- "#ffff00"
+blue <- "#0000ff"
+red <- "#dc143c"
+green <- "#1ed760"
+
+visual <- ggplot(total, aes(x=reorder(total$Track, -total$difference), y=total$difference, fill=total$Region, text=(paste("Track:", total$Track, "<br>",
+                                      "Artist:", total$Artist, "<br>",
+                                      "Energy:", total$energy))))+
+  geom_col()+
+  scale_fill_manual(values=c(black, yellow, blue, red, green))+
+  theme_minimal()+
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.ticks.y=element_blank(),
+        panel.grid.major = element_blank(),
+        legend.position="none")+
+  ylab("Energy Difference")+
+  facet_wrap(~ Region)+
+  ggtitle("Energy Difference")
+
+visual
+
+ggplotly(visual, tooltip=c("text"))
+```
+
+Generation of the full Spotify data frame with chart information and track details merged.
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+# build up the full spotify dataframe
+us["Region"] <- "North America"
+brazil["Region"] <- "South America"
+france["Region"] <- "Europe"
+singapore["Region"] <- "Asia"
+global["Region"] <- "World"
+spotify <- do.call("rbind", list(us, brazil, france, singapore, global))
+
+track.details <- data.frame(matrix(ncol= length(columns), nrow= 0))
+colnames(track.details) <- columns
+for (x in 1:nrow(spotify)) {
+  spotify_id <- basename(spotify$`Song URL`[x])
+  track.details <- rbind( track.details, (get_track_audio_features(spotify_id)))
+  
+  for ( y in 1:length(columns)) {
+    spotify[x,y + 6] <- track.details[x,y]
+  }
+}
+spotify %>%
+```
+
+The following exploratory data analysis visualizes the relationship between literacy and the speechiness of the most popular songs of a country. We begin with showing the distribution of speechiness across the country dataset by region. While the average literacy of the world is approximately 80% and the chosen countries have above average literacy, we do not see a clear trend toward more literate countries preferring more speech in their songs. Values between 0.33 and 0.66 include a mix of speech and song often found in rap music; so one could begin to consider that North and South American countries may enjoy this type of music more because the upper whisker and outliers lean well into that area.
+```{r EDA_3, echo=TRUE, message=FALSE, warning=FALSE}
+# Distribution of speechiness values in our spotify dataset
+spotify %>%
+  ggplot(aes(x = speechiness, fill = Region)) +
+  my.theme +
+  labs(x = "Literacy",
+       y = "Speechiness",
+       title = "Distribution of Speechiness in Spotify") +
+  geom_histogram()
+
+# EDA: speechiness v literacy plot
+spotify %>%
+  ggplot(aes(
+    x = Literacy,
+    y = speechiness,
+    group = Region,
+    fill = Region
+  )) +
+  my.theme +
+  labs(x = "Literacy",
+       y = "Speechiness",
+       title = "Distribution of Speechiness by Region") +
+  geom_boxplot()
+```
+
+Liveness represents performance and to stand in opposition to recording, amplification, and other methods of electronically mediating music. Liveness is classfied by region and compared by streams. Focusing first on the distribution of liveness in our dataset, one can see that the South American region has more live songs on the charts than the other regions as given by its presence in the latter half of the histogram.
+
+As seen when plotting liveness and streams, each region has a different distribution. For example, South America was narrow and skewed which reflects on the level of streams and the population of Brazil. The differences in the plots shows that there is a direct relationship between liveness and regionality.
+```{r EDA_4, echo=TRUE, message=FALSE, warning=FALSE}
+# Distribution of liveness probability in the dataset
+spotify %>%
+  ggplot(aes(x = liveness, fill = Region)) +
+  my.theme +
+  labs(x = "Liveness",
+       title = "Distribution of Liveness on Region") +
+  geom_histogram()
+
+# EDA: Streams v Liveness plot
+spotify %>%
+  ggplot(aes(x = Streams, y = liveness, fill = Region)) +
+  my.theme +
+  labs(x = "Streams",
+       y = "Liveness",
+       title = "Distribution of Streams by Liveness on Region") +
+  facet_grid(. ~ Region) +
+  geom_boxplot()
+```
+
+Instrumentalness is the quality of being instrumental. These regions have similar levels of instrumentalness and show a central mean tendency.
+```{r EDA_5, echo=TRUE, message=FALSE, warning=FALSE}
+# Distribution of instrumentalness values in our country dataset
+spotify %>%
+  ggplot(aes(x = instrumentalness, fill = Region)) +
+  my.theme +
+  labs(x = "Instrumentalness",
+       title = "Distribution of Instrumentalness in Spotify") +
+  geom_histogram()
+
+# EDA: Streams v Instrumentalness plot
+spotify %>%
+  ggplot(aes(
+    x = Streams,
+    y = instrumentalness,
+    group = Region,
+    color = Region
+  )) +
+  my.theme +
+  labs(x = "Streams",
+       y = "Instrumentalness",
+       title = "Distribution of Streams by Instrumentalness") +
+  facet_grid(~ Region) +
+  geom_point()
+```
+
+The following is an analysis of the relationship between the industry proportion of a country's economy with a song's popularity in a region. From the first plot, we see that South America possesses the most industry-based economy while the North American region has the least industry-based economy-- which infers they are mostly a service based economy.
+```{r EDA_6, echo=TRUE, message=FALSE, warning=FALSE}
+# Distribution of Industry by Region
+spotify %>%
+  ggplot(aes(x = Region , y = Industry, color = Region)) +
+  my.theme +
+  labs(x = "Region",
+       y = "Industry",
+       title = "Distribution of Industry by Region") +
+  geom_point(size = (spotify$Industry * 20))
+
+# Industry by Streams on Region
+spotify %>%
+  ggplot(aes(x = Industry, y = Streams, fill = Region)) +
+  my.theme +
+  labs(x = "Industry",
+       y = "Streams",
+       title = "Distribution of Industry by Streams on Region") +
+  geom_boxplot() +
+  facet_grid(~ Region)
+
+```
+
+
+## **Hypothesis Testing**
+Hypothesis Testing provides a more concrete way of analyzing the trends we found in our exploratory dtaa analysis. In this section of our project, we will analyze the normalization of the p_values of danceability, energy, and speechiness in order to assess their individual relationships with regions of the world. 
+
+We assume that the p_a rates of danceability, energy, and speechiness are 0.5 because they are on a scale of 0 to 1. There are written expected value and variance functions in order to assist in the p normalization process. The p_b value is found in a filtered count of all songs that have danceability, energy, and speechiness between 0.5 and 0.6 divided by the total size of songs, 2500. We did this by choosing the mean of the sample value in order to get an median representation of danceability, energy, and speechiness.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+square <- function(x){
+  squared <- x*x
+  return(squared)
+}
+
+# Function for calculation of expected_value  
+expectation <- function(n, p) {
+  return ((1/n) * (n*p))
+}
+
+# Function for calculation of variance
+variance <- function(n, p){
+  return ((1/(square(n))) * (n *(p * (1 - p))))
+}
+
+p_a = .5
+```
+
+We calculate expected value and variance with a sample size of 2500 given the 500 songs included from each of the 5 "regions".
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+exp <- expectation(2500, p_a)
+exp
+var <- variance(2500, p_a)
+var
+
+
+
+# Given
+dance_count <- filter(spotify, danceability >= 0.5 & danceability < 0.6)
+dance_phat <- 318 / 2500
+dance_phat
+# Using results from above as mean and standard deviation,
+p_value <- pnorm(dance_phat, mean=exp, sd= sqrt(var))
+p_value
+```
+We would reject the null hypothesis for danceability because the p value of danceability is lower than the alpha 0.05, which shows that there is a relationship between danceability and region. This supports our exploratory data analysis that examines the effects of danceability against the number of streams in a specific region as aforementioned the danceability varies around the world. 
+
+```{r}
+energy_count <- filter(spotify, energy >= 0.5 & energy < 0.6)
+energy_phat <- 441 / 2500
+energy_phat
+# Using results from above as mean and standard deviation,
+p_value <- pnorm(energy_phat, mean=exp, sd= sqrt(var))
+p_value
+```
+
+We would reject the null hypothesis for energy because the value of energy is lower than the alpha 0.05, which shows that there is a relationship between energy and region. This reflects on the exploratory data analysis provided by our group on the correlation of energy difference to region. Similarly to danceability, the energy levels differed per region. 
+
+```{r}
+speech_count <- filter(spotify, speechiness >= 0.5 & speechiness < 0.6)
+speech_phat <- 19 / 2500
+speech_phat
+# Using results from above as mean and standard deviation,
+p_value <- pnorm(speech_phat, mean=exp, sd= sqrt(var))
+p_value
+```
+
+We would reject the null hypothesis for speechiness because the value of speechiness is lower than the alpha 0.05, which shows that there is a relationship between speechiness and region. The margin of speechiness was small because the speechiness levels differ drastically per region. 
+
+## **Machine Learning**
+
+For machine learning, our goal is to create a linear model that is able to predict which song will achieve the highest number of streams. Our initial perceptions were that danceability, energy, and speechiness were the most important factors after performing exploratory data analysis and hypothesis testing on those attributes. While all the predictors were statistically significant, the accuracy of our model was low as shown by the R-Squared scores in the summary. To remedy this low score and achieve a more accurate model, we explored different combinations of attributes and returned with danceability, speechiness, literacy, instrumentalness, and industry as the new predictors. We began to see as we incorporate qualities such as instrumentalness that energy was not as statistically significant in comparison.
+
+```{r model_creation, echo=TRUE, message=FALSE, warning=FALSE}
+# create two models: one based on our initial perceptions, other based strictly on improving the model
+model <-
+  lm(Streams ~ danceability + energy + speechiness, data = spotify)
+model_adjusted <-
+  lm(Streams ~ danceability  + speechiness + Literacy + instrumentalness + Industry,
+     data = spotify)
+
+model %>%
+  broom::tidy() %>%
+  knitr::kable()
+summary(model)
+
+model_adjusted %>%
+  broom::tidy() %>%
+  knitr::kable()
+summary(model_adjusted)
+```
+
+To further prove our conclusion that the latter model performs predictions better than the first, we plotted the residuals on the fitted values to the difference between the prediction and observed. As expected, values in the adjusted model center better around where residuals = 0, and a linear fit is appropriate given the linearity of the plot. While we do see a large amount of unexplained variance around 1.2 million, predictions based on human preferences do possess the quality of being unexplainable to a point. We also perform the F-test
+```{r model_analysis, echo=TRUE, message=FALSE, warning=FALSE}
+# Plot residuals of each model
+model %>%
+  broom::augment() %>%
+  ggplot(aes(x = .fitted, y = .resid)) +
+  theme(plot.title = element_text(hjust = 0.5, size = 22)) +
+  labs(title =  "Violin Plot of Residuals",
+       x = "Fitted Values",
+       y = "Residuals") +
+  geom_violin(trim = TRUE)
+
+model_adjusted %>%
+  broom::augment() %>%
+  ggplot(aes(x = .fitted, y = .resid)) +
+  theme(plot.title = element_text(hjust = 0.5, size = 22)) +
+  labs(title =  "Violin Plot of Residuals",
+       x = "Fitted Values",
+       y = "Residuals") +
+  geom_violin(trim = TRUE)
+
+# F Test to compare the two models
+F.test.results <- anova(model, model_adjusted, test = "F")
+F.test.results %>%
+  broom::tidy() %>%
+  knitr::kable()
+```
+
+
+# Conclusion
+The work that we conducted in analyzing the different aspects of music including but not limited to danceability, energy level, and speechability as well as how they correlate to general statistics such as literacy rate and musical statistics such as number of streams, leaves the door open to further research. By utilizing data science methods and tools such as data scaping, data visualization, hypothesis testing, and linear regression, one can explore even more the relationship between music and the places it is made worldwide. Questions for possible future consideration include:
+1) The possible correlation between time period such as month or season and music popularity acorss region
+2) How music popularity varies within the different COUNTRIES of a particular region based on the above musical statistics
+3) Whether or not, global music popularity is influenced more by one region or regions than others
+In conclusion, the abundance of information that can be gained by means of data ingestion, manipulation, and interpretation allows us to formulate and test generalizations about the relationship between variables and proved valuable in our exploration of the correlation between music and region.
+
+# Useful Resources
+* Consider downloading the *PD_data_cia.xls* from <http://gsociology.icaap.org/data/PD_data_cia.xls> for more information about how the data was collected or meaning of certain attribute factors.
+* You may find more information about the track details of a song on spotify from <https://developer.spotify.com/documentation/web-api/reference/tracks/get-audio-features/>.
+* For more information about how data is collected at Spotify, consider reading the streaming service's Frequently Asked Questions page at <https://artists.spotify.com/faq/stats>.
+
+# References
+Lasso, Fernando. “Countries of the World.”, Version 1, 26 April 2018, US. “Countries of the World.”, https://www.kaggle.com/fernandol/countries-of-the-world.
